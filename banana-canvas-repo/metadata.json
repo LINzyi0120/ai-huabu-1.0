@@ -1,5 +1,6 @@
 {
-  "name": "Remix: 香蕉画图",
-  "description": "一个类似 Flowith 的无限画布 AI 图像生成工具，支持调整各种生图参数。",
-  "requestFramePermissions": []
+  "name": "API-画布-1.0",
+  "description": "Commercial-grade AI product photography platform. Generate professional product images from reference photos using Gemini multi-modal models.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
 }
