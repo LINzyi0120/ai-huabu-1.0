@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 对话工坊</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3B82F6', // Blue
+                        surface: '#F8FAFC',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: -apple-system, system-ui, sans-serif; background-color: #F8FAFC; }
+        .message-ai { background-color: white; border: 1px solid #E2E8F0; border-radius: 0 16px 16px 16px; }
+        .message-user { background-color: #3B82F6; color: white; border-radius: 16px 0 16px 16px; }
+        .scroll-hide::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="h-screen flex text-slate-800">
+
+    <!-- Sidebar -->
+    <aside class="w-72 bg-white border-r border-slate-200 flex flex-col z-20">
+        <div class="p-6 border-b border-slate-100">
+            <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-indigo-600 flex items-center gap-2">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                对话工坊
+            </h1>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto p-6 space-y-6">
+            <!-- Settings -->
+            <div class="space-y-4">
+                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">连接设置</h3>
+                <div>
+                    <input type="text" id="apiBaseUrl" value="https://api.bltcy.ai" placeholder="API Base URL" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <input type="password" id="apiKey" placeholder="输入 API Key" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <button onclick="fetchModels()" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg transition-colors">验证网络 & 刷新模型</button>
+            </div>
+
+            <hr class="border-slate-100">
+
+            <!-- Parameters -->
+            <div class="space-y-4">
+                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">模型参数</h3>
+                <div>
+                    <label class="text-sm font-medium text-slate-600 mb-1 block">模型</label>
+                    <select id="modelSelector" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg outline-none">
+                        <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                        <option value="gpt-4-turbo">gpt-4-turbo</option>
+                        <option value="claude-3-opus-20240229">claude-3-opus</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-sm font-medium text-slate-600 mb-1 block">System Prompt</label>
+                    <textarea id="systemPrompt" rows="3" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg outline-none resize-none" placeholder="设定AI的角色定位..."></textarea>
+                </div>
+                <div>
+                    <label class="flex justify-between text-sm font-medium text-slate-600 mb-1">
+                        <span>Temperature</span>
+                        <span id="tempValue">0.7</span>
+                    </label>
+                    <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7" class="w-full accent-blue-500" oninput="document.getElementById('tempValue').textContent=this.value">
+                </div>
+            </div>
+            
+            <div class="pt-4">
+                <button onclick="clearChat()" class="w-full py-2 text-red-500 bg-red-50 hover:bg-red-100 text-sm font-medium rounded-lg transition-colors">清空对话记录</button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Chat Area -->
+    <main class="flex-1 flex flex-col relative h-full">
+        <!-- Chat History -->
+        <div id="chatContainer" class="flex-1 overflow-y-auto p-6 md:p-10 space-y-6">
+            <!-- Empty State -->
+            <div id="emptyState" class="h-full flex flex-col items-center justify-center text-slate-400 opacity-60">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <p class="mt-4 text-sm font-medium">输入你的问题开始对话</p>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="bg-white border-t border-slate-200 p-4 shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
+            <div class="max-w-4xl mx-auto flex flex-col gap-2">
+                <!-- Image Preview (Vision) -->
+                <div id="imagePreviewContainer" class="hidden flex gap-2">
+                    <div class="relative inline-block">
+                        <img id="imagePreview" src="" class="h-16 rounded border border-slate-200 object-cover">
+                        <button onclick="removeImage()" class="absolute -top-2 -right-2 bg-slate-800 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">✕</button>
+                    </div>
+                </div>
+
+                <div class="relative flex items-end gap-2">
+                    <button class="p-3 text-slate-400 hover:text-blue-500 transition-colors" onclick="document.getElementById('imageInput').click()" title="上传图片 (Vision)">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    </button>
+                    <input type="file" id="imageInput" class="hidden" accept="image/*" onchange="handleImage(event)">
+                    
+                    <textarea 
+                        id="messageInput" 
+                        class="flex-1 max-h-40 min-h-[44px] bg-slate-50 border border-slate-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 resize-none overflow-y-auto text-sm"
+                        placeholder="给 AI 发送消息... (Enter 发送，Shift+Enter 换行)"
+                        onkeydown="handleKeydown(event)"
+                        oninput="this.style.height='44px';this.style.height=this.scrollHeight+'px'"
+                    ></textarea>
+                    
+                    <button 
+                        onclick="sendMessage()" 
+                        class="h-11 w-11 shrink-0 bg-blue-500 hover:bg-blue-600 text-white rounded-xl flex items-center justify-center transition-colors shadow-sm"
+                    >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let chatHistory = [];
+        let currentBase64Image = null;
+
+        function loadConfig() {
+            document.getElementById('apiKey').value = localStorage.getItem('chat_apiKey') || '';
+            const savedUrl = localStorage.getItem('chat_baseUrl');
+            if(savedUrl) document.getElementById('apiBaseUrl').value = savedUrl;
+        }
+
+        async function fetchModels() {
+            const key = document.getElementById('apiKey').value;
+            const url = document.getElementById('apiBaseUrl').value.replace(/\/$/, '');
+            localStorage.setItem('chat_apiKey', key);
+            localStorage.setItem('chat_baseUrl', url);
+
+            try {
+                const res = await fetch(`${url}/v1/models`, { headers: { 'Authorization': `Bearer ${key}` }});
+                if (res.ok) {
+                    const data = await res.json();
+                    const models = data.data.filter(m => !m.id.includes('image') && !m.id.includes('video')); // Rough filter
+                    const sel = document.getElementById('modelSelector');
+                    sel.innerHTML = models.map(m => `<option value="${m.id}">${m.id}</option>`).join('');
+                    alert("模型获取成功！");
+                }
+            } catch (e) {
+                alert("获取模型失败, 请检查网络或 Key: " + e.message);
+            }
+        }
+
+        function handleImage(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                currentBase64Image = e.target.result;
+                document.getElementById('imagePreview').src = currentBase64Image;
+                document.getElementById('imagePreviewContainer').classList.remove('hidden');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function removeImage() {
+            currentBase64Image = null;
+            document.getElementById('imagePreviewContainer').classList.add('hidden');
+            document.getElementById('imageInput').value = '';
+        }
+
+        function appendMessage(role, text, imageUrl = null) {
+            document.getElementById('emptyState').style.display = 'none';
+            const container = document.getElementById('chatContainer');
+            const div = document.createElement('div');
+            div.className = `flex w-full ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            
+            const htmlText = text.replace(/\\n/g, '<br>');
+            const imgHtml = imageUrl ? `<img src="${imageUrl}" class="w-48 rounded mb-2 object-cover">` : '';
+
+            div.innerHTML = `
+                <div class="max-w-[80%] p-4 shadow-sm text-sm leading-relaxed ${role === 'user' ? 'message-user' : 'message-ai text-slate-700'}">
+                    ${imgHtml}
+                    <div>${htmlText || (role==='ai'?'<span class="animate-pulse">思考中...</span>':'')}</div>
+                </div>
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+            return div;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const text = input.value.trim();
+            if (!text && !currentBase64Image) return;
+
+            const key = document.getElementById('apiKey').value;
+            const url = document.getElementById('apiBaseUrl').value.replace(/\/$/, '');
+            const model = document.getElementById('modelSelector').value;
+            const temp = parseFloat(document.getElementById('temperature').value);
+            const sys = document.getElementById('systemPrompt').value;
+
+            if(!key) return alert("请在左侧填写 API Key");
+
+            appendMessage('user', text, currentBase64Image);
+            input.value = '';
+            input.style.height = '44px';
+
+            const userContent = [];
+            if(text) userContent.push({ type: "text", text: text });
+            if(currentBase64Image) {
+                userContent.push({ type: "image_url", image_url: { url: currentBase64Image }});
+            }
+
+            chatHistory.push({ role: 'user', content: userContent });
+            const b64Cache = currentBase64Image;
+            removeImage();
+
+            const aiMessageNode = appendMessage('ai', '');
+            
+            // Build payload
+            const payloadMessages = [];
+            if (sys) payloadMessages.push({ role: 'system', content: sys });
+            payloadMessages.push(...chatHistory.map(m => ({
+                role: m.role,
+                content: typeof m.content === 'string' ? m.content : (m.content.length === 1 && m.content[0].type === 'text' ? m.content[0].text : m.content)
+            })));
+
+            try {
+                const res = await fetch(`${url}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: payloadMessages,
+                        temperature: temp
+                    })
+                });
+
+                if (!res.ok) throw new Error(await res.text());
+                const data = await res.json();
+                const reply = data.choices[0].message.content;
+                chatHistory.push({ role: 'assistant', content: reply });
+                
+                aiMessageNode.querySelector('div>div').innerHTML = reply.replace(/\\n/g, '<br>');
+            } catch (e) {
+                aiMessageNode.querySelector('div>div').innerHTML = `<span class="text-red-500">Error: ${e.message}</span>`;
+            }
+        }
+
+        function handleKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function clearChat() {
+            chatHistory = [];
+            document.getElementById('chatContainer').innerHTML = `
+                <div id="emptyState" class="h-full flex flex-col items-center justify-center text-slate-400 opacity-60">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <p class="mt-4 text-sm font-medium">输入你的问题开始对话</p>
+                </div>
+            `;
+        }
+
+        loadConfig();
+    </script>
+</body>
+</html>

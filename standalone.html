@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 多模型画布工作台</title>
+    <!-- Tailwind CSS (CDN for standalone file) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        cream: '#FDFBF7',
+                        terracotta: '#E27D60',
+                        terracottaHover: '#C86A50',
+                        sand: '#E8A87C',
+                        sage: '#C38D9E',
+                        teal: '#41B3A3',
+                    },
+                    backgroundImage: {
+                        'dot-pattern': 'radial-gradient(#d1ceca 1px, transparent 1px)'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #FDFBF7;
+            color: #333;
+        }
+
+        .canvas-bg {
+            background-image: radial-gradient(#d1ceca 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        .scroll-hidden::-webkit-scrollbar {
+            display: none;
+        }
+        .scroll-hidden {
+            -ms-overflow-style: none; /* IE and Edge */
+            scrollbar-width: none; /* Firefox */
+        }
+
+        /* Card animations */
+        .card-enter {
+            animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .card-hover {
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .card-hover:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Lightbox */
+        #lightbox {
+            transition: opacity 0.3s ease;
+        }
+        #lightbox.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .chat-bubble-ai {
+            background-color: #f1f0ee;
+            border-bottom-left-radius: 4px;
+        }
+        
+        .chat-bubble-user {
+            background-color: #E27D60;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .loading-dots::after {
+            content: '';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80%, 100% { content: '...'; }
+        }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden text-zinc-800">
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center hidden opacity-0 transition-opacity">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 w-[400px] max-w-[90vw] transform transition-transform scale-95" id="settingsModalContent">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold">API 设置</h2>
+                <button onclick="toggleSettings()" class="text-zinc-400 hover:text-zinc-600">✕</button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-zinc-600 mb-1">API Base URL</label>
+                    <input type="text" id="apiBaseUrl" value="https://api.bltcy.ai" class="w-full px-3 py-2 border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-terracotta/50 focus:border-terracotta">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-zinc-600 mb-1">API Key</label>
+                    <input type="password" id="apiKey" placeholder="sk-..." class="w-full px-3 py-2 border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-terracotta/50 focus:border-terracotta">
+                </div>
+                <div class="pt-2 flex gap-3">
+                    <button onclick="testConnection()" class="flex-1 px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-lg transition-colors text-sm font-medium flex items-center justify-center gap-2">
+                        <span id="testBtnText">测试连接</span>
+                    </button>
+                    <button onclick="saveSettings()" class="flex-1 px-4 py-2 bg-terracotta hover:bg-terracottaHover text-white rounded-lg transition-colors text-sm font-medium">
+                        保存并关闭
+                    </button>
+                </div>
+                <div id="testResult" class="text-sm mt-2 hidden text-center"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lightbox -->
+    <div id="lightbox" class="fixed inset-0 bg-black/90 z-[60] hidden flex items-center justify-center" onclick="closeLightbox()">
+        <button class="absolute top-4 right-4 text-white hover:text-gray-300" onclick="closeLightbox()">✕</button>
+        <img id="lightboxImg" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl" src="" alt="Preview">
+    </div>
+
+    <!-- Left Sidebar -->
+    <aside class="w-80 bg-white border-r border-zinc-200 flex flex-col z-20 shadow-sm relative">
+        <!-- Header -->
+        <div class="p-4 border-b border-zinc-100 flex items-center justify-between">
+            <h1 class="font-bold text-lg text-terracotta flex items-center gap-2">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+                工作台
+            </h1>
+            <button onclick="toggleSettings()" class="p-1.5 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-md transition-colors" title="Settings">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+        </div>
+
+        <!-- Mode Selector -->
+        <div class="p-4 border-b border-zinc-100">
+            <div class="flex bg-zinc-100 p-1 rounded-lg">
+                <button onclick="setMode('chat')" id="tab-chat" class="flex-1 py-1.5 text-sm font-medium rounded-md transition-all">对话</button>
+                <button onclick="setMode('image')" id="tab-image" class="flex-1 py-1.5 text-sm font-medium rounded-md transition-all">图像</button>
+                <button onclick="setMode('video')" id="tab-video" class="flex-1 py-1.5 text-sm font-medium rounded-md transition-all">视频</button>
+            </div>
+        </div>
+
+        <!-- Active Model Selector -->
+        <div class="p-4 pt-3 border-b border-zinc-100 flex flex-col gap-2">
+            <div class="flex justify-between items-center">
+                <label class="text-xs font-bold text-zinc-500 uppercase tracking-wider">选择模型</label>
+                <button onclick="fetchModels()" class="text-xs text-terracotta hover:underline">刷新</button>
+            </div>
+            <select id="modelSelector" class="w-full bg-zinc-50 border border-zinc-200 text-zinc-800 text-sm rounded-lg focus:ring-terracotta focus:border-terracotta block p-2">
+                <option value="">加载中...</option>
+            </select>
+        </div>
+
+        <!-- Sidebar Content (Scrollable) -->
+        <div class="flex-1 overflow-y-auto scroll-hidden p-4">
+            
+            <!-- Context & Parameters -->
+            <div id="params-chat" class="params-section space-y-4">
+                <div>
+                    <label class="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 block">System Prompt</label>
+                    <textarea id="chatSystemPrompt" rows="3" class="w-full text-sm p-2 border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-terracotta resize-none bg-zinc-50" placeholder="You are a helpful assistant."></textarea>
+                </div>
+                <div>
+                    <label class="flex justify-between text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">
+                        <span>Temperature</span>
+                        <span id="chatTempLabel">0.7</span>
+                    </label>
+                    <input type="range" id="chatTemp" min="0" max="2" step="0.1" value="0.7" class="w-full accent-terracotta">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">图片输入 (Vision)</label>
+                    <div class="border border-dashed border-zinc-300 rounded-lg p-3 text-center cursor-pointer hover:bg-zinc-50 transition-colors" onclick="document.getElementById('chatImageInput').click()">
+                        <span class="text-xs text-zinc-500">+ 点击上传或拖拽图片</span>
+                        <input type="file" id="chatImageInput" class="hidden" accept="image/*" onchange="handleImageSelect(event, 'chat')">
+                    </div>
+                    <div id="chatImagePreviewContainer" class="mt-2 hidden">
+                        <div class="relative inline-block">
+                            <img id="chatImagePreview" class="h-16 w-auto rounded border border-zinc-200" src="">
+                            <button onclick="clearImage('chat')" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">✕</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="params-image" class="params-section space-y-4 hidden">
+                <div>
+                    <label class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">生成尺寸</label>
+                    <select id="imageSize" class="w-full bg-zinc-50 border border-zinc-200 text-zinc-800 text-sm rounded-lg focus:ring-terracotta focus:border-terracotta block p-2">
+                        <option value="1024x1024">1024x1024 (1:1)</option>
+                        <option value="1024x1792">1024x1792 (9:16)</option>
+                        <option value="1792x1024">1792x1024 (16:9)</option>
+                        <option value="512x512">512x512</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">生成数量 (n)</label>
+                    <input type="number" id="imageCount" value="1" min="1" max="4" class="w-full text-sm p-2 bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-terracotta">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">质量 (Quality)</label>
+                    <select id="imageQuality" class="w-full bg-zinc-50 border border-zinc-200 text-zinc-800 text-sm rounded-lg focus:ring-terracotta focus:border-terracotta block p-2">
+                        <option value="standard">Standard</option>
+                        <option value="hd">HD</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">参考图 / 垫图</label>
+                    <div class="border border-dashed border-zinc-300 rounded-lg p-3 text-center cursor-pointer hover:bg-zinc-50 transition-colors" onclick="document.getElementById('imageRefInput').click()">
+                        <span class="text-xs text-zinc-500">+ 添加参考图</span>
+                        <input type="file" id="imageRefInput" class="hidden" accept="image/*" onchange="handleImageSelect(event, 'image')">
+                    </div>
+                    <div id="imageRefPreviewContainer" class="mt-2 hidden">
+                        <div class="relative inline-block">
+                            <img id="imageRefPreview" class="h-16 w-auto rounded border border-zinc-200" src="">
+                            <button onclick="clearImage('image')" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">✕</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="params-video" class="params-section space-y-4 hidden">
+                <div>
+                    <label class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">分辨率</label>
+                    <select id="videoResolution" class="w-full bg-zinc-50 border border-zinc-200 text-zinc-800 text-sm rounded-lg focus:ring-terracotta focus:border-terracotta block p-2">
+                        <option value="720p">720p</option>
+                        <option value="1080p">1080p</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">首尾帧参考图</label>
+                    <div class="border border-dashed border-zinc-300 rounded-lg p-3 text-center cursor-pointer hover:bg-zinc-50 transition-colors" onclick="document.getElementById('videoRefInput').click()">
+                        <span class="text-xs text-zinc-500">+ 添加图像 (Image-to-Video)</span>
+                        <input type="file" id="videoRefInput" class="hidden" accept="image/*" onchange="handleImageSelect(event, 'video')">
+                    </div>
+                    <div id="videoRefPreviewContainer" class="mt-2 hidden">
+                        <div class="relative inline-block">
+                            <img id="videoRefPreview" class="h-16 w-auto rounded border border-zinc-200" src="">
+                            <button onclick="clearImage('video')" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">✕</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </aside>
+
+    <!-- Main Canvas Area -->
+    <main class="flex-1 flex flex-col relative bg-cream">
+        
+        <!-- Top Navigation -->
+        <header class="h-14 border-b border-zinc-200/50 bg-white/50 backdrop-blur-md flex items-center justify-between px-6 z-10 sticky top-0">
+            <div class="flex items-center gap-3">
+                <div id="connectionStatus" class="w-2 h-2 rounded-full bg-zinc-300"></div>
+                <span id="connectionText" class="text-xs font-medium text-zinc-500">未连接</span>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <button onclick="clearCanvas()" class="px-3 py-1.5 text-xs font-medium text-zinc-600 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors flex items-center gap-1.5">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                    清空画布
+                </button>
+            </div>
+        </header>
+
+        <!-- Canvas Board -->
+        <div id="canvasBoard" class="flex-1 overflow-auto p-8 canvas-bg flex flex-wrap content-start gap-6 relative">
+            <!-- Cards will be injected here -->
+            <div id="emptyState" class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-50">
+                <div class="text-center">
+                    <svg class="mx-auto h-12 w-12 text-zinc-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                    <h3 class="mt-2 text-sm font-medium text-zinc-500">画布空空如也</h3>
+                    <p class="mt-1 text-sm text-zinc-400">在下方输入内容开始生成...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Input Area -->
+        <div class="bg-white border-t border-zinc-200 p-4 shrink-0 transition-all z-20 shadow-[0_-10px_40px_rgba(0,0,0,0.03)]">
+            <div class="max-w-4xl mx-auto relative group">
+                <textarea 
+                    id="mainInput" 
+                    rows="1" 
+                    class="w-full bg-zinc-50 border border-zinc-200 rounded-2xl pl-4 pr-14 py-3 sm:py-4 text-sm focus:outline-none focus:ring-2 focus:ring-terracotta/30 focus:border-terracotta focus:bg-white transition-all resize-none shadow-sm min-h-[52px] max-h-[200px]"
+                    placeholder="输入提示词... (Enter 发送, Shift+Enter 换行)"
+                    oninput="this.style.height = '';this.style.height = this.scrollHeight + 'px'"
+                    onkeydown="handleInputKeydown(event)"
+                ></textarea>
+                <button 
+                    onclick="submitTask()" 
+                    id="submitBtn"
+                    class="absolute right-2 bottom-2 w-8 h-8 sm:w-10 sm:h-10 bg-terracotta hover:bg-terracottaHover text-white rounded-xl flex items-center justify-center transition-all shadow-md group-hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Global Scripts -->
+    <script>
+        // State
+        let currentMode = 'chat'; // chat, image, video
+        let models = [];
+        let config = {
+            apiKey: '',
+            baseUrl: 'https://api.bltcy.ai'
+        };
+        let chatHistory = {}; // Keep chat history per model or session
+        let activeImages64 = {
+            chat: null,
+            image: null,
+            video: null
+        };
+        let pollIntervals = {}; // For video status tracking
+
+        // Extensibility Hook
+        const registeredModelTypes = {
+            chat: { keywords: ['gpt', 'claude', 'gemini', 'qwen', 'chat', 'instruct'] },
+            image: { keywords: ['dall-e', 'midjourney', 'sd', 'flux', 'image', 'vision'] },
+            video: { keywords: ['sora', 'runway', 'pika', 'video', 'luma'] }
+        };
+
+        function registerModelType(name, config) {
+            registeredModelTypes[name] = config;
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSettings();
+            setMode('chat');
+            
+            // Slider listeners
+            document.getElementById('chatTemp').addEventListener('input', (e) => {
+                document.getElementById('chatTempLabel').textContent = e.target.value;
+            });
+
+            // Prevent drag-drop default
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                document.body.addEventListener(eventName, preventDefaults, false);
+            });
+            document.body.addEventListener('drop', handleFileDrop, false);
+            document.getElementById('mainInput').addEventListener('paste', handlePaste);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function handleFileDrop(e) {
+            let dt = e.dataTransfer;
+            let files = dt.files;
+            handleFiles(files, currentMode);
+        }
+
+        function handlePaste(e) {
+            let items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            for (index in items) {
+                let item = items[index];
+                if (item.kind === 'file') {
+                    let blob = item.getAsFile();
+                    handleFiles([blob], currentMode);
+                }
+            }
+        }
+
+        // Settings Management
+        function toggleSettings() {
+            const modal = document.getElementById('settingsModal');
+            const content = document.getElementById('settingsModalContent');
+            if (modal.classList.contains('hidden')) {
+                modal.classList.remove('hidden');
+                setTimeout(() => {
+                    modal.classList.remove('opacity-0');
+                    content.classList.remove('scale-95');
+                }, 10);
+            } else {
+                modal.classList.add('opacity-0');
+                content.classList.add('scale-95');
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                }, 300);
+            }
+        }
+
+        function loadSettings() {
+            const stored = localStorage.getItem('ai_canvas_config');
+            if (stored) {
+                config = JSON.parse(stored);
+                document.getElementById('apiKey').value = config.apiKey || '';
+                document.getElementById('apiBaseUrl').value = config.baseUrl || 'https://api.bltcy.ai';
+                if (config.apiKey) {
+                    fetchModels();
+                } else {
+                    updateConnectionStatus(false, '未配置 API Key');
+                }
+            } else {
+                updateConnectionStatus(false, '未配置 API Key');
+                setTimeout(toggleSettings, 500); // Auto open if no key
+            }
+        }
+
+        function saveSettings() {
+            config.apiKey = document.getElementById('apiKey').value.trim();
+            config.baseUrl = document.getElementById('apiBaseUrl').value.trim().replace(/\/$/, ""); // Remove trailing slash
+            localStorage.setItem('ai_canvas_config', JSON.stringify(config));
+            toggleSettings();
+            fetchModels();
+        }
+
+        function updateConnectionStatus(isOk, text) {
+            const dot = document.getElementById('connectionStatus');
+            const label = document.getElementById('connectionText');
+            dot.className = `w-2 h-2 rounded-full ${isOk ? 'bg-green-500' : 'bg-red-500'}`;
+            label.textContent = text;
+        }
+
+        async function testConnection() {
+            const btnText = document.getElementById('testBtnText');
+            const resDiv = document.getElementById('testResult');
+            const key = document.getElementById('apiKey').value.trim();
+            const url = document.getElementById('apiBaseUrl').value.trim().replace(/\/$/, "");
+            
+            btnText.textContent = '测试中...';
+            resDiv.classList.add('hidden');
+            resDiv.className = 'text-sm mt-2 text-center';
+
+            try {
+                const res = await fetch(`${url}/v1/models`, {
+                    headers: { 'Authorization': `Bearer ${key}` }
+                });
+                
+                if (res.ok) {
+                    resDiv.textContent = '连接成功！';
+                    resDiv.classList.add('text-green-600');
+                    updateConnectionStatus(true, '已连接');
+                } else {
+                    const err = await res.text();
+                    resDiv.textContent = `连接失败: ${res.status} ${err.substring(0, 50)}`;
+                    resDiv.classList.add('text-red-500');
+                    updateConnectionStatus(false, '连接错误');
+                }
+            } catch (e) {
+                resDiv.textContent = `网络错误: ${e.message}`;
+                resDiv.classList.add('text-red-500');
+                updateConnectionStatus(false, '网络离线');
+            }
+            
+            resDiv.classList.remove('hidden');
+            btnText.textContent = '测试连接';
+        }
+
+        // Mode Navigation
+        function setMode(mode) {
+            currentMode = mode;
+            // Update tabs
+            ['chat', 'image', 'video'].forEach(m => {
+                const btn = document.getElementById(`tab-${m}`);
+                if (m === mode) {
+                    btn.classList.add('bg-white', 'text-terracotta', 'shadow-sm');
+                    btn.classList.remove('text-zinc-500', 'hover:bg-zinc-200/50');
+                } else {
+                    btn.classList.remove('bg-white', 'text-terracotta', 'shadow-sm');
+                    btn.classList.add('text-zinc-500', 'hover:bg-zinc-200/50');
+                }
+            });
+
+            // Update param panels
+            document.querySelectorAll('.params-section').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`params-${mode}`).classList.remove('hidden');
+
+            renderModelOptions();
+            
+            // Adjust input placeholder
+            const input = document.getElementById('mainInput');
+            if(mode === 'chat') input.placeholder = "输入对话内容... (可粘贴图片)";
+            if(mode === 'image') input.placeholder = "描述你想生成的画面...";
+            if(mode === 'video') input.placeholder = "描述视频动作和场景...";
+        }
+
+        function guessModelType(modelId) {
+            const id = modelId.toLowerCase();
+            for (const [type, conf] of Object.entries(registeredModelTypes)) {
+                if (conf.keywords.some(kw => id.includes(kw))) {
+                    // special override for vision mixed in chat
+                    return type;
+                }
+            }
+            return 'chat'; // Default fallback
+        }
+
+        async function fetchModels() {
+            if (!config.apiKey || !config.baseUrl) return;
+            
+            const selector = document.getElementById('modelSelector');
+            selector.innerHTML = '<option>加载中...</option>';
+            
+            try {
+                const res = await fetch(`${config.baseUrl}/v1/models`, {
+                    headers: { 'Authorization': `Bearer ${config.apiKey}` }
+                });
+                
+                if (res.ok) {
+                    const data = await res.json();
+                    
+                    // Process and sort models
+                    models = data.data.map(m => ({
+                        id: m.id,
+                        type: guessModelType(m.id)
+                    }));
+                    
+                    updateConnectionStatus(true, '已连接');
+                    renderModelOptions();
+                } else {
+                    throw new Error(res.status);
+                }
+            } catch (e) {
+                console.error("Fetch models error:", e);
+                selector.innerHTML = '<option value="">获取模型失败</option>';
+            }
+        }
+
+        function renderModelOptions() {
+            const selector = document.getElementById('modelSelector');
+            if (models.length === 0) {
+                selector.innerHTML = '<option value="">无模型数据</option>';
+                return;
+            }
+
+            const filtered = models.filter(m => m.type === currentMode);
+            if (filtered.length === 0) {
+                selector.innerHTML = '<option value="">无该类型模型</option>';
+                return;
+            }
+
+            selector.innerHTML = '';
+            filtered.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.id;
+                opt.textContent = m.id;
+                selector.appendChild(opt);
+            });
+            
+            // Try restore last used for this mode
+            const lastUsed = localStorage.getItem(`lastModel_${currentMode}`);
+            if (lastUsed && filtered.some(m => m.id === lastUsed)) {
+                selector.value = lastUsed;
+            }
+        }
+
+        document.getElementById('modelSelector').addEventListener('change', (e) => {
+            if (e.target.value) {
+                localStorage.setItem(`lastModel_${currentMode}`, e.target.value);
+            }
+        });
+
+        // Image Handling
+        function handleImageSelect(e, mode) {
+            handleFiles(e.target.files, mode);
+        }
+
+        function handleFiles(files, mode) {
+            if (!files || files.length === 0) return;
+            const file = files[0];
+            if (!file.type.startsWith('image/')) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                activeImages64[mode] = e.target.result;
+                document.getElementById(`${mode}ImagePreview`).src = e.target.result;
+                document.getElementById(`${mode}ImagePreviewContainer`).classList.remove('hidden');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function clearImage(mode) {
+            activeImages64[mode] = null;
+            document.getElementById(`${mode}ImagePreviewContainer`).classList.add('hidden');
+            document.getElementById(`${mode}ImagePreview`).src = '';
+            const input = document.getElementById(`${mode}ImageInput`);
+            if(input) input.value = '';
+        }
+
+        // Interaction
+        function handleInputKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitTask();
+            }
+        }
+
+        function clearCanvas() {
+            if (confirm('确定要清空所有卡片吗？')) {
+                document.getElementById('canvasBoard').innerHTML = `
+                    <div id="emptyState" class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-50">
+                        <div class="text-center">
+                            <svg class="mx-auto h-12 w-12 text-zinc-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                            </svg>
+                            <h3 class="mt-2 text-sm font-medium text-zinc-500">画布空空如也</h3>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function removeCard(id) {
+            const card = document.getElementById(id);
+            if (card) {
+                card.style.opacity = 0;
+                card.style.transform = 'scale(0.9)';
+                setTimeout(() => card.remove(), 300);
+            }
+        }
+
+        // Submission Logic
+        async function submitTask() {
+            const inputEl = document.getElementById('mainInput');
+            const prompt = inputEl.value.trim();
+            const modelId = document.getElementById('modelSelector').value;
+            
+            if (!prompt && !activeImages64[currentMode]) return;
+            if (!config.apiKey) {
+                alert("请先设置 API Key");
+                toggleSettings();
+                return;
+            }
+            if (!modelId) {
+                alert("请选择模型");
+                return;
+            }
+
+            // Clear input
+            inputEl.value = '';
+            inputEl.style.height = '52px';
+            
+            // Hide empty state
+            const empty = document.getElementById('emptyState');
+            if (empty) empty.style.display = 'none';
+
+            // Create placeholder card
+            const taskId = 'task_' + Date.now();
+            createCardPlaceholder(taskId, currentMode, prompt, modelId);
+
+            try {
+                if (currentMode === 'chat') {
+                    await handleChatGeneration(taskId, modelId, prompt, activeImages64.chat);
+                } else if (currentMode === 'image') {
+                    await handleImageGeneration(taskId, modelId, prompt, activeImages64.image);
+                } else if (currentMode === 'video') {
+                    await handleVideoGeneration(taskId, modelId, prompt, activeImages64.video);
+                }
+            } catch (error) {
+                updateCardError(taskId, error.message);
+            }
+        }
+
+        // --- View Updates ---
+
+        function createCardPlaceholder(id, type, prompt, model) {
+            const canvas = document.getElementById('canvasBoard');
+            const card = document.createElement('div');
+            card.id = id;
+            
+            let typeColor = type === 'chat' ? 'bg-blue-500' : type === 'image' ? 'bg-purple-500' : 'bg-red-500';
+            
+            // Adjust card sizing based on type
+            let widthClass = type === 'chat' ? 'w-[400px]' : type === 'image' ? 'w-[320px]' : 'w-[380px]';
+
+            card.className = `${widthClass} bg-white rounded-2xl shadow-sm border border-zinc-200 flex flex-col card-enter card-hover relative overflow-hidden self-start`;
+            
+            card.innerHTML = `
+                <div class="px-4 py-3 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
+                    <div class="flex items-center gap-2 overflow-hidden">
+                        <div class="${typeColor} w-2 h-2 rounded-full shrink-0"></div>
+                        <span class="text-xs font-bold text-zinc-600 truncate uppercase tracking-wider">${model}</span>
+                    </div>
+                    <button onclick="removeCard('${id}')" class="text-zinc-400 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
+                </div>
+                <!-- Prompt section (if text exists) -->
+                ${prompt ? `
+                <div class="p-4 bg-zinc-50 border-b border-zinc-100 italic text-sm text-zinc-600 line-clamp-2" title="${prompt.replace(/"/g, '&quot;')}">
+                    "${prompt}"
+                </div>` : ''}
+                <!-- Content Section -->
+                <div id="content_${id}" class="p-6 flex items-center justify-center min-h-[160px]">
+                    <div class="flex flex-col items-center gap-3 text-terracotta">
+                        <svg class="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                        <span class="text-xs font-medium tracking-widest uppercase loading-dots" id="status_${id}">生成中</span>
+                    </div>
+                </div>
+            `;
+            // Prepend new cards
+            canvas.insertBefore(card, canvas.firstChild);
+            // In case we prepended before emptyState
+            const es = document.getElementById('emptyState');
+            if(es) canvas.appendChild(es);
+        }
+
+        function updateCardError(id, errMsg) {
+            const content = document.getElementById(`content_${id}`);
+            if(!content) return;
+            content.className = "p-4 bg-red-50 min-h-[100px] flex items-center";
+            content.innerHTML = `
+                <div class="flex items-start gap-2 text-red-600 text-sm">
+                    <svg class="shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span class="break-all">${errMsg}</span>
+                </div>
+            `;
+        }
+
+        // --- API Handlers ---
+
+        async function handleChatGeneration(taskId, modelId, prompt, b64Image) {
+            // Manage History
+            if (!chatHistory[modelId]) {
+                const sys = document.getElementById('chatSystemPrompt').value.trim();
+                chatHistory[modelId] = [];
+                if (sys) {
+                    chatHistory[modelId].push({ role: 'system', content: sys });
+                }
+            }
+
+            const message = { role: 'user', content: [] };
+            if (prompt) {
+                message.content.push({ type: 'text', text: prompt });
+            }
+            if (b64Image) {
+                message.content.push({ type: 'image_url', image_url: { url: b64Image } });
+                clearImage('chat'); // Reset after send
+            }
+            
+            // Fallback for models that don't support array content format
+            let payloadContent = message.content;
+            if(!b64Image && message.content.length === 1 && message.content[0].type === 'text') {
+                payloadContent = prompt;
+            }
+
+            chatHistory[modelId].push({ role: 'user', content: payloadContent });
+
+            const payload = {
+                model: modelId,
+                messages: chatHistory[modelId],
+                temperature: parseFloat(document.getElementById('chatTemp').value),
+            };
+
+            const res = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${config.apiKey}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const err = await res.text();
+                throw new Error(`API Error: ${res.status} ${err}`);
+            }
+
+            const data = await res.json();
+            const reply = data.choices[0].message.content;
+            
+            // Save to history
+            chatHistory[modelId].push({ role: 'assistant', content: reply });
+
+            // Render
+            const contentDiv = document.getElementById(`content_${taskId}`);
+            contentDiv.className = "p-4 space-y-4 max-h-[400px] overflow-y-auto w-full text-sm leading-relaxed";
+            
+            // Basic markdown/line break to HTML
+            const formattedReply = reply.replace(/\n/g, '<br>').replace(/```(.*?)```/gs, '<pre class="bg-zinc-900 text-zinc-100 p-2 rounded my-2 overflow-x-auto"><code>$1</code></pre>');
+
+            contentDiv.innerHTML = `
+                ${b64Image ? `<div class="flex justify-end"><img src="${b64Image}" class="h-20 rounded border border-zinc-200 object-cover"></div>` : ''}
+                <div class="chat-bubble-ai p-3 rounded-2xl w-full text-sm text-zinc-800">
+                    ${formattedReply}
+                </div>
+            `;
+        }
+
+        async function handleImageGeneration(taskId, modelId, prompt, b64Image) {
+            const payload = {
+                model: modelId,
+                prompt: prompt || 'a randomly generated image',
+                size: document.getElementById('imageSize').value,
+                n: parseInt(document.getElementById('imageCount').value),
+                quality: document.getElementById('imageQuality').value
+            };
+
+            if (b64Image) {
+                // Compatible with standard OpenAI edits format broadly
+                payload.image = b64Image;
+                clearImage('image');
+            }
+
+            // Using generations as base endpoint. If API expects edits, this is a limitation
+            // of standardizing across standard OpenAI spec.
+            const endpoint = b64Image ? '/v1/images/edits' : '/v1/images/generations';
+
+            const res = await fetch(`${config.baseUrl}${endpoint}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${config.apiKey}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const err = await res.text();
+                throw new Error(`API Error: ${res.status} ${err}`);
+            }
+
+            const data = await res.json();
+            
+            const contentDiv = document.getElementById(`content_${taskId}`);
+            contentDiv.className = "relative group cursor-pointer w-full object-cover p-0 border-0";
+            contentDiv.innerHTML = '';
+
+            const urls = data.data.map(d => d.url || (d.b64_json ? `data:image/png;base64,${d.b64_json}` : null)).filter(Boolean);
+            
+            if (urls.length === 0) throw new Error("API 未返回图片数据");
+
+            // Create grid if multiple
+            const gridClass = urls.length > 1 ? (urls.length === 2 ? 'grid-cols-2' : 'grid-cols-2 aspect-square') : 'grid-cols-1';
+            
+            const wrapper = document.createElement('div');
+            wrapper.className = `grid ${gridClass} gap-1 w-full bg-zinc-100`;
+            
+            urls.forEach(url => {
+                wrapper.innerHTML += `
+                    <div class="relative w-full overflow-hidden" onclick="openLightbox('${url}')">
+                        <img src="${url}" class="w-full h-auto object-cover hover:scale-105 transition-transform duration-500" loading="lazy">
+                        <div class="absolute inset-0 bg-black/0 hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 hover:opacity-100">
+                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                        </div>
+                    </div>
+                `;
+            });
+            contentDiv.appendChild(wrapper);
+        }
+
+        async function handleVideoGeneration(taskId, modelId, prompt, b64Image) {
+            const payload = {
+                model: modelId,
+                prompt: prompt,
+                resolution: document.getElementById('videoResolution').value
+            };
+
+            if (b64Image) {
+                payload.image_url = b64Image;
+                clearImage('video');
+            }
+
+            const res = await fetch(`${config.baseUrl}/v1/video/generations`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${config.apiKey}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const err = await res.text();
+                throw new Error(`API Error: ${res.status} ${err}`);
+            }
+
+            const data = await res.json();
+            
+            // Check if synchronous
+            if (data.url || data.video_url || (data.data && data.data[0] && data.data[0].url)) {
+                renderVideoCard(taskId, data.url || data.video_url || data.data[0].url);
+            } 
+            // Async polling
+            else if (data.task_id || data.id) {
+                const jobId = data.task_id || data.id;
+                document.getElementById(`status_${taskId}`).textContent = "排队/生成中";
+                pollVideoStatus(taskId, jobId);
+            } else {
+                throw new Error("无法识别的视频返回格式");
+            }
+        }
+
+        async function pollVideoStatus(cardId, taskId) {
+            let attempts = 0;
+            const maxAttempts = 120; // 10 minutes (5s interval)
+            
+            pollIntervals[cardId] = setInterval(async () => {
+                attempts++;
+                if (attempts > maxAttempts) {
+                    clearInterval(pollIntervals[cardId]);
+                    updateCardError(cardId, "轮询超时");
+                    return;
+                }
+
+                try {
+                    const res = await fetch(`${config.baseUrl}/v1/video/status?task_id=${taskId}`, {
+                        headers: { 'Authorization': `Bearer ${config.apiKey}` }
+                    });
+                    
+                    if (!res.ok) throw new Error(res.status);
+                    
+                    const data = await res.json();
+                    
+                    // Standardized Luma/Runway status mappings conceptually
+                    const status = (data.status || 'pending').toLowerCase();
+                    const statusLabel = document.getElementById(`status_${cardId}`);
+                    
+                    if (status === 'success' || status === 'completed') {
+                        clearInterval(pollIntervals[cardId]);
+                        renderVideoCard(cardId, data.url || data.video_url || (data.data && data.data[0].url));
+                    } else if (status === 'failed' || status === 'error') {
+                        clearInterval(pollIntervals[cardId]);
+                        updateCardError(cardId, data.error || "视频生成失败");
+                    } else if (statusLabel) {
+                        statusLabel.textContent = `生成中 ${data.progress ? '('+data.progress+'%)' : ''}`;
+                    }
+                } catch (e) {
+                    // Ignore single failures, might be temporary network issue
+                    console.log("Poll warn:", e);
+                }
+            }, 5000);
+        }
+
+        function renderVideoCard(id, videoUrl) {
+            const contentDiv = document.getElementById(`content_${id}`);
+            if(!contentDiv) return;
+            contentDiv.className = "w-full p-0 border-0 bg-black";
+            contentDiv.innerHTML = `
+                <video src="${videoUrl}" controls autoplay loop muted class="w-full h-auto object-cover max-h-[400px]"></video>
+            `;
+        }
+
+        // --- Lightbox ---
+        function openLightbox(url) {
+            document.getElementById('lightboxImg').src = url;
+            const lb = document.getElementById('lightbox');
+            lb.classList.remove('hidden');
+        }
+
+        function closeLightbox() {
+            document.getElementById('lightbox').classList.add('hidden');
+            setTimeout(() => {
+                document.getElementById('lightboxImg').src = '';
+            }, 300); // Wait for transition
+        }
+    </script>
+</body>
+</html>
